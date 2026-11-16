@@ -4,7 +4,7 @@
     python -m bench export h2o-24q -o cases/                # case files for non-Python codes
     python -m bench run h2o-16q                             # reference code, correctness gate + timing
     python -m bench run h2o-24q --point 2 -o baseline.json  # one evaluation: the 24-qubit baseline
-    python -m bench run --case-file cases/x.npz --impl ...   # a case file without answers: results recorded
+    python -m bench run --case-file hidden/x.npz --impl ...  # no answers: results recorded for the judges
     python -m bench run h2o-24q --impl mycode.py:MyEvaluator -o result.json
     mpirun -np 8 python -m bench run anthracene-28q --impl my.mod:Dist --mpi
     python -m bench vqe h2o-24q --impl mycode.py:MyEvaluator   # full UCCSD optimization (stage 6)
@@ -124,7 +124,7 @@ def cmd_run(args):
         sys.exit(f"error: no reference answers for {case.name} (bench/references/{case.name}.json)")
     log(f"case            {case.name}: {case.description}  ({case.n_qubits} qubits, {case.n_params} parameters)")
     if ref is None:
-        log("reference       none: results are recorded, not checked (gate UNCHECKED)")
+        log("reference       none: results are recorded for the judges, who check them (the hidden case)")
     impl, setup = _make(args, case, comm, log)
     points = list(enumerate(ref["points"] if ref else gate.standard_points(case.n_params)))
     if args.point is not None:
@@ -234,7 +234,7 @@ def main(argv=None):
         r = sub.add_parser(name, help={"run": "correctness gate + timing of energy_and_gradient",
                                        "vqe": "full UCCSD optimization, time to solution"}[name])
         r.add_argument("case", nargs="?", choices=list(CASES))
-        r.add_argument("--case-file", help="a case exported with `export`")
+        r.add_argument("--case-file", help="a case exported with `export` (e.g. the hidden case)")
         r.add_argument("--reference", help="reference answers (default bench/references/<case>.json)")
         r.add_argument("--impl", help="module:Class or path/file.py:Class (default: the reference code)")
         r.add_argument("--mpi", action="store_true", help="run under mpirun; comm is passed to the implementation")
