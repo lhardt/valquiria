@@ -610,10 +610,10 @@ python -m bench run h2o-16q                                 # reference code: co
 python -m bench run h2o-24q --impl mycode.py:MyEvaluator -o result.json
 python -m bench vqe h2o-24q --impl mycode.py:MyEvaluator    # full optimization, time to solution
 python -m bench run h2o-24q --point 2 -o baseline-24q.json   # one evaluation: the 24-qubit baseline
-python -m bench run --case-file hidden/x.npz --impl mycode.py:MyEvaluator -o hidden.json
+python -m bench run --case-file cases/h2o-24q.npz --impl mycode.py:MyEvaluator   # an exported case
 python -m bench export h2o-24q -o cases/                    # .npz + .json for non-Python codes
 mpirun -np 8 python -m bench run anthracene-28q --impl mymod:Dist --mpi
-python -m bench submit-check team07/valqyrie                # check a submission tree (--layout: the spec)
+python -m bench submit-check <submission_dir>              # check a submission tree (--layout: the spec)
 ```
 
 | case | role | qubits | parameters |
@@ -644,14 +644,15 @@ stored answers no longer apply.) Setup in `__init__` is timed separately. Under 
 **The correctness gate** (`bench/gate.py`): at three stored parameter points (θ = 0, and two
 random points), the energy must match to 1e-10 Ha and every gradient component to 1e-8, and the
 energy must not fall below E_FCI. `bench vqe` runs BFGS from θ = 0 with tolerance 1e-10 (the
-settings of `VQE`) and must reach the stored final energy to 1e-7 Ha. For the hidden case the
-answers stay with the judges: `--case-file` without `--reference` records the energies and
-gradients at the same three points (gate `UNCHECKED`), and the judges check the report. Every
+settings of `VQE`) and must reach the stored final energy to 1e-7 Ha. `--case-file` runs an
+exported case; when no answers are stored for it and no `--reference` is given, bench records the
+energies and gradients at the same three points (gate `UNCHECKED`) instead of checking them. Every
 report carries the raw results and a fingerprint of the case it was computed on.
 
-**Submissions** go in one folder per ministage, `<team>/valqyrie/stage<S>/ministage<M>/`, with the
+**Submissions** go in one folder per ministage, `<submission_dir>/stage<S>/ministage<M>/`, with the
 files `python -m bench submit-check --layout` lists; ministages can be handed in in any order.
-`python -m bench submit-check <tree>` checks a tree before it is uploaded.
+`<submission_dir>` is the team folder the organizers create. `python -m bench submit-check <submission_dir>`
+checks a tree before it is uploaded.
 
 The reference implementation (`bench.interface.ReferenceEvaluator`) is the ValQyriE code as it
 stands: the full 2ⁿ statevector, with a sparse Hamiltonian up to 20 qubits and the matrix-free

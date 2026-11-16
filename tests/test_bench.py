@@ -127,7 +127,6 @@ def test_submit_check(tmp_path, capsys):
     d = tmp_path / "stage2" / "ministage1"
     d.mkdir(parents=True)
     (d / "fixed.json").write_text(json.dumps(_report("h2o-24q")))
-    (d / "hidden.json").write_text(json.dumps(_report("lih-12q", gate_="UNCHECKED", repeats=0) | {"case": "hidden-a"}))
     (d / "code.tar.gz").write_bytes(b"x")
     (d / "notes.md").write_text("notes")
     assert check_tree(tmp_path) == {"2.1": []}

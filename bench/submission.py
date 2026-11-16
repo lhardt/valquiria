@@ -1,14 +1,14 @@
 """The submission tree: what each ministage hands in, and a checker teams run before uploading.
 
     python -m bench submit-check --layout                 # print the expected tree
-    python -m bench submit-check team07/valqyrie          # check a tree (any subset of ministages)
+    python -m bench submit-check <submission_dir>        # check a tree (any subset of ministages)
 
-A submission is a folder per ministage, ``<root>/stage<S>/ministage<M>/``. Ministages can be
-handed in in any order and at any time; a missing folder is simply not graded yet. Each folder
+A submission is a folder per ministage, ``<submission_dir>/stage<S>/ministage<M>/``, where
+``<submission_dir>`` is the team folder the organizers create (e.g. ``/submissions/team07``).
+Ministages can be handed in in any order and at any time; a missing folder is simply not graded yet. Each folder
 holds the files listed in ``SPEC``:
 
-* ``run``: a ``python -m bench run ... -o <file>`` report, on the case named (``hidden`` = the
-  hidden case file the judges handed out, run with ``--case-file``);
+* ``run``: a ``python -m bench run ... -o <file>`` report, on the case named;
 * ``vqe``: a ``python -m bench vqe ... -o <file>`` report;
 * ``peak`` / ``stress``: a ``python -m stress peak|run ... -o <file>`` report;
 * ``metrics``: a JSON object with the listed keys (numbers unless stated);
@@ -20,7 +20,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .cases import CASES, build_case
+from .cases import build_case
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,7 @@ class Item:
     name: str
     kind: str                    # run | vqe | peak | stress | metrics | text | file | dir
     help: str
-    case: str | None = None      # run / vqe: a case name, or "hidden"
+    case: str | None = None      # run / vqe: a case name
     min_repeats: int = 0         # run: --repeats at least this
     point: int | None = None     # run: made with --point this
     min_ranks: int = 1           # run: MPI ranks (one per GPU) at least this
@@ -41,8 +41,7 @@ NOTES = Item("notes.md", "text", "what you changed and why, with the exact build
 CODE = Item("code.tar.gz", "file", "your code at this ministage: git archive -o code.tar.gz HEAD")
 FIXED = Item("fixed.json", "run", "bench run h2o-24q --impl ... --repeats 4 -o fixed.json",
              case="h2o-24q", min_repeats=4)
-HIDDEN = Item("hidden.json", "run", "bench run --case-file <hidden>.npz --impl ... -o hidden.json", case="hidden")
-TIMED = (FIXED, HIDDEN, CODE, NOTES)
+TIMED = (FIXED, CODE, NOTES)
 MULTI_FIXED = Item("fixed.json", "run", "bench run h2o-24q --mpi --impl ... --repeats 4 -o fixed.json on all your GPUs",
                    case="h2o-24q", min_repeats=4, min_ranks=2)
 
@@ -79,18 +78,16 @@ SPEC: dict[str, tuple[Item, ...]] = {
     "5.1": (Item("fixed-2gpu.json", "run", "bench run h2o-24q --mpi on 2 GPUs (one rank per GPU)",
                  case="h2o-24q", min_ranks=2, max_ranks=2),
             Item("fixed-allgpu.json", "run", "bench run h2o-24q --mpi on all your GPUs", case="h2o-24q", min_ranks=2),
-            HIDDEN, CODE, NOTES),
+            CODE, NOTES),
     # 5.2 and 5.3: the same code on all your GPUs, 5.2 with overlap switched off and 5.3 with it on
-    "5.2": (MULTI_FIXED, HIDDEN, CODE, NOTES,
+    "5.2": (MULTI_FIXED, CODE, NOTES,
             metrics("share of run time spent communicating, overlap off (0-1)", "comm_fraction"),
             Item("profile", "dir", "profiler trace the comm_fraction was measured from")),
-    "5.3": (MULTI_FIXED, HIDDEN, CODE, NOTES),
+    "5.3": (MULTI_FIXED, CODE, NOTES),
     "5.4": (Item("anthracene.json", "run", "bench run anthracene-28q --mpi --repeats 4 on all your GPUs",
                  case="anthracene-28q", min_repeats=4),
-            HIDDEN, CODE, NOTES),
+            CODE, NOTES),
     "6.1": (Item("vqe.json", "vqe", "bench vqe h2o-24q --impl ... -o vqe.json", case="h2o-24q"),
-            Item("hidden-vqe.json", "vqe", "bench vqe --case-file <hidden>.npz --impl ... -o hidden-vqe.json",
-                 case="hidden"),
             CODE, NOTES),
     "6.2": (metrics("bond-length scan", "scan_time_s", "n_geometries"),
             Item("scan", "dir", "every VQE report of the scan"), CODE, NOTES),
@@ -98,7 +95,7 @@ SPEC: dict[str, tuple[Item, ...]] = {
             Item("vqe.json", "vqe", "the bench vqe h2o-24q run the energy was measured on", case="h2o-24q"),
             Item("power", "dir", "power meter trace of that run"), NOTES),
     "6.4": (Item("stress.json", "stress", "python -m stress run --mode mixed --duration 3600 -o stress.json"),
-            HIDDEN, Item("report.pdf", "file", "the final report"), CODE, NOTES),
+            Item("report.pdf", "file", "the final report"), CODE, NOTES),
 }
 
 
@@ -108,7 +105,7 @@ def folder(ministage: str) -> str:
 
 
 def layout() -> str:
-    lines = ["<team>/valqyrie/"]
+    lines = ["<submission_dir>/"]
     for ms, items in SPEC.items():
         lines.append(f"  {folder(ms)}/")
         lines += [f"      {it.name + ('/' if it.kind == 'dir' else ''):<20} {it.help}" for it in items]
@@ -157,10 +154,7 @@ def check_item(path: Path, it: Item, fingerprints: dict) -> list[str]:
     if (it.kind == "run") != is_run or "case" not in d:
         return [f"{it.name}: not a bench {it.kind} report"]
     case = d["case"]
-    if it.case == "hidden":
-        if case in CASES:
-            problems.append(f"{it.name}: made on {case}, not on the hidden case")
-    elif case != it.case:
+    if case != it.case:
         problems.append(f"{it.name}: made on {case}, expected {it.case}")
     elif d.get("case_sha256") != fingerprints.setdefault(case, build_case(case).fingerprint()):
         problems.append(f"{it.name}: the case data differs from the shipped {case}")

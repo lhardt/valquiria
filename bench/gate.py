@@ -17,8 +17,7 @@ POINTS = [(0.0, 0), (0.02, 101), (0.2, 202)]
 
 
 def standard_points(n_params: int) -> list[dict]:
-    """The checked points of a case without stored answers (the hidden case): the judges' answers
-    are computed at the same points."""
+    """The checked points of a case without stored answers: answers made later use the same points."""
     return [{"scale": scale, "seed": seed,
              "theta": scale * np.random.default_rng(seed).standard_normal(n_params)} for scale, seed in POINTS]
 
