@@ -12,7 +12,63 @@ from __future__ import annotations
 
 import numpy as np
 
+from numba import jit
+
+from qcore.circuit import Circuit
+from qcore.excitations import excitation_generator
+from qcore.problem import MolecularProblem
+from scipy.sparse.linalg import LinearOperator
+import importlib.util
+import sys
+from pathlib import Path
+
+from qcore.pauli import PauliSum, parity_sign, popcount
+
 from bench.interface import ReferenceEvaluator
+
+
+
+def generator_offload(psi, self__x, self_x, self_zs, self_gs, idx):
+    src = idx ^ self__x
+    d = np.zeros(idx.size, dtype=np.complex128)
+    for z, g in zip(self_zs, self_gs):
+        ph = 1j * g * (1j) ** (bin(self_x & z).count('1') % 4)
+        d += ph * parity_sign(src & np.uint64(z)) if z else ph
+    if np.all(np.abs(d.imag) < 1e-14):
+        d = np.ascontiguousarray(d.real)
+    w = np.abs(d)
+    binary = bool(np.all((np.abs(w) < 1e-12) | (np.abs(w - 1) < 1e-12)))
+    w2 = (w > 0.5).astype(float) if binary else w
+
+    return d * (psi[idx ^ self__x] if self_x else psi)
+
+
+def rotate_offload(self__x, self_x, self_zs, self_gs, idx, a, psi, g_psi):
+
+    src = idx ^ self__x
+    d = np.zeros(idx.size, dtype=np.complex128)
+    for z, g in zip(self_zs, self_gs):
+        ph = 1j * g * (1j) ** (bin(self_x & z).count("1") % 4)
+        d += ph * parity_sign(src & np.uint64(z)) if z else ph
+    if np.all(np.abs(d.imag) < 1e-14):
+        d = np.ascontiguousarray(d.real)
+    w = np.abs(d)
+    binary = bool(np.all((np.abs(w) < 1e-12) | (np.abs(w - 1) < 1e-12)))
+    w2 = (w > 0.5).astype(float) if binary else w
+
+    #d, w, binary = self._diag(idx)
+    if self_x == 0:  # diagonal generator: exp(a d) elementwise
+        return np.exp(a * d) * psi
+    if binary:  # w in {0, 1}
+        if w.all():
+            return np.cos(a) * psi + np.sin(a) * g_psi
+        return psi + ((np.cos(a) - 1.0) * w) * psi + np.sin(a) * g_psi
+    aw = a * w
+    safe = np.where(w > 0, w, 1.0)
+    return np.cos(aw) * psi + np.where(w > 0, np.sin(aw) / safe, a) * g_psi
+
+def angle_offload(coeff, theta, param) -> float:
+    return coeff * theta[param] if param is not None else coeff
 
 
 class MyEvaluator:
@@ -42,12 +98,28 @@ class MyEvaluator:
     # ------------------------------------------------------------ the three hot kernels
     def generator(self, op, psi):
         """G psi: gather psi[c ^ x] and multiply by a parity sign (TODO: fuse, compile, offload)."""
-        return op.apply_generator(psi, self.idx)
+
+        self__x = op._x
+        self_x = op.x
+        self_zs = op.zs
+        self_gs = op.gs
+        idx = self.idx
+
+        return generator_offload(psi, self__x, self_x, self_zs, self_gs, idx)
+
 
     def rotate(self, op, psi, angle, g_psi=None):
         """exp(angle * G) psi, an exact 2x2 rotation on each amplitude pair."""
         g_psi = self.generator(op, psi) if g_psi is None else g_psi
-        return op.rotate(psi, angle, g_psi, self.idx)
+
+        self__x = op._x
+        self_x = op.x
+        self_zs = op.zs
+        self_gs = op.gs
+        idx = self.idx
+
+        #op.rotate(psi, angle, g_psi, self.idx)
+        return  rotate_offload(self__x, self_x, self_zs, self_gs, idx, angle, psi, g_psi) 
 
     def apply_h(self, psi):
         """H psi (TODO: sector-restricted, matrix-free or GPU sparse)."""
@@ -62,7 +134,7 @@ class MyEvaluator:
         theta = np.asarray(theta, float)
         phi = self.circuit.initial_vector()  # the Hartree-Fock determinant
         for op in self.ops:
-            a = op.angle(theta)
+            a = angle_offload(op.coeff, theta, op.param) # op.angle(theta)
             if a != 0.0:
                 phi = self.rotate(op, phi, a)
         lam = self.apply_h(phi)
