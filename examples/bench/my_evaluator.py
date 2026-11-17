@@ -42,9 +42,6 @@ def generator_offload(psi : numpy.ndarray,
         d += ph * parity_sign(src & np.uint64(z)) if z else ph
     if np.all(np.abs(d.imag) < 1e-14):
         d = np.ascontiguousarray(d.real)
-    w = np.abs(d)
-    binary = bool(np.all((np.abs(w) < 1e-12) | (np.abs(w - 1) < 1e-12)))
-    w2 = (w > 0.5).astype(float) if binary else w
 
     return d * (psi[idx ^ self__x] if self_x else psi)
 
