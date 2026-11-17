@@ -108,28 +108,15 @@ class MyEvaluator:
     # ------------------------------------------------------------ the three hot kernels
     def generator(self, op, psi):
         """G psi: gather psi[c ^ x] and multiply by a parity sign (TODO: fuse, compile, offload)."""
-
-        self__x = op._x
-        self_x = op.x
-        self_zs = op.zs
-        self_gs = op.gs
-        idx = self.idx
-
-        return generator_offload(psi, self__x, self_x, self_zs, self_gs, idx)
+        return generator_offload(psi, op._x, op.x, op.zs, op.gs, self.idx)
 
 
     def rotate(self, op, psi, angle, g_psi=None):
         """exp(angle * G) psi, an exact 2x2 rotation on each amplitude pair."""
         g_psi = self.generator(op, psi) if g_psi is None else g_psi
 
-        self__x = op._x
-        self_x = op.x
-        self_zs = op.zs
-        self_gs = op.gs
-        idx = self.idx
-
         #op.rotate(psi, angle, g_psi, self.idx)
-        return  rotate_offload(self__x, self_x, self_zs, self_gs, idx, angle, psi, g_psi) 
+        return  rotate_offload(op._x, op.x, op.zs, op.gs, self.idx, angle, psi, g_psi) 
 
     def apply_h(self, psi):
         """H psi (TODO: sector-restricted, matrix-free or GPU sparse)."""
