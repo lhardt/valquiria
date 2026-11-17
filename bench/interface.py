@@ -20,6 +20,14 @@ import importlib
 import numpy as np
 
 
+from qcore.circuit import Circuit
+from qcore.excitations import excitation_generator
+from qcore.problem import MolecularProblem
+from scipy.sparse.linalg import LinearOperator
+import importlib.util
+import sys
+from pathlib import Path
+
 class ReferenceEvaluator:
     """Stage 1.1 baseline: the ValQyriE code as it stands (full 2^n statevector, NumPy).
 
@@ -28,9 +36,6 @@ class ReferenceEvaluator:
     """
 
     def __init__(self, case, comm=None):
-        from qcore.circuit import Circuit
-        from qcore.excitations import excitation_generator
-        from qcore.problem import MolecularProblem
         p = MolecularProblem.from_integrals(case.h1, case.h2, case.e_core, case.n_alpha, case.n_beta, "jw",
                                             e_fci=np.nan)
         circ = Circuit(p.n_qubits, case.hf_index)
@@ -40,7 +45,6 @@ class ReferenceEvaluator:
         if p.n_qubits <= 20:
             self.hamiltonian = p.hamiltonian_sparse
         else:
-            from scipy.sparse.linalg import LinearOperator
             ham = p.hamiltonian
             dim = 1 << p.n_qubits
             self.hamiltonian = LinearOperator((dim, dim), matvec=ham.apply, dtype=np.complex128)
@@ -57,9 +61,6 @@ def load_impl(spec: str | None):
     if not cls_name:
         raise ValueError(f"--impl must look like module:Class, got {spec!r}")
     if mod_name.endswith(".py"):
-        import importlib.util
-        import sys
-        from pathlib import Path
         path = Path(mod_name).resolve()
         sys.path.insert(0, str(path.parent))
         spec_ = importlib.util.spec_from_file_location(path.stem, path)

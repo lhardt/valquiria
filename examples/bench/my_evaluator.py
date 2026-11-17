@@ -21,9 +21,20 @@ class MyEvaluator:
         # data to a GPU here. The case is defined in bench/cases.py (integrals h1, h2, e_core,
         # n_alpha, n_beta, hf_occupation, excitations).
         self.case, self.comm = case, comm
-        ref = ReferenceEvaluator(case)  # TODO: replace with your own data structures
-        self.circuit = ref.circuit
-        self.hamiltonian = ref.hamiltonian
+
+
+        p = MolecularProblem.from_integrals(case.h1, case.h2, case.e_core, case.n_alpha, case.n_beta, "jw", e_fci=np.nan)
+        circ = Circuit(p.n_qubits, case.hf_index)
+        for k, exc in enumerate(case.excitations):
+            circ.add_generator(excitation_generator(p.mapping, exc), circ.new_parameter(f"t{k}"))
+        self.circuit = circ
+        if p.n_qubits <= 20:
+            self.hamiltonian = p.hamiltonian_sparse
+        else:
+            ham = p.hamiltonian
+            dim = 1 << p.n_qubits
+            self.hamiltonian = LinearOperator((dim, dim), matvec=ham.apply, dtype=np.complex128)
+
         self.idx = self.circuit.idx
         # each excitation k is one block rotation exp(theta_k G_k) acting on pairs (c, c ^ x)
         self.ops = self.circuit.ops
