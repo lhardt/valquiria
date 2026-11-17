@@ -28,7 +28,13 @@ from bench.interface import ReferenceEvaluator
 
 
 
-def generator_offload(psi, self__x, self_x, self_zs, self_gs, idx):
+def generator_offload(psi : numpy.ndarray, 
+                      self__x : numpy.uint64, 
+                      self_x : int, 
+                      self_zs : list[int], 
+                      self_gs : list[float], 
+                      idx  : numpy.ndarray):
+
     src = idx ^ self__x
     d = np.zeros(idx.size, dtype=np.complex128)
     for z, g in zip(self_zs, self_gs):
@@ -43,7 +49,14 @@ def generator_offload(psi, self__x, self_x, self_zs, self_gs, idx):
     return d * (psi[idx ^ self__x] if self_x else psi)
 
 
-def rotate_offload(self__x, self_x, self_zs, self_gs, idx, a, psi, g_psi):
+def rotate_offload(self__x : numpy.uint64, 
+                   self_x : int, 
+                   self_zs, 
+                   self_gs, 
+                   idx : numpy.ndarray, 
+                   a : numpy.float64,
+                   psi : numpy.ndarray,
+                   g_psi: numpy.ndarray):
 
     src = idx ^ self__x
     d = np.zeros(idx.size, dtype=np.complex128)
