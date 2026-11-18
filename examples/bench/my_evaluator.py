@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from numba import jit
+from numba import njit
 
 from qcore.circuit import Circuit
 from qcore.excitations import excitation_generator
@@ -22,12 +22,40 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from qcore.pauli import PauliSum, parity_sign, popcount
+from qcore.pauli import PauliSum
 
 from bench.interface import ReferenceEvaluator
 
 
+@njit
+def one_popcnt( x : int ) -> int:
+    ans = 0
+    while x > 0:
+        if x & 1:
+            ans = ans + 1
+        x = x // 2
+    return ans
+# 
+# @jit
+# def arr_popcnt( arr : numpy.ndarray ) -> numpy.ndarray:
+#     return np.array([one_popcnt(x) for x in arr])
 
+
+_BYTE_POPCOUNT = np.array([bin(i).count("1") for i in range(256)], dtype=np.int64)
+
+@njit
+def popcount(a: np.ndarray) -> np.ndarray:
+    a = np.asarray(a, dtype=np.uint64)
+    flat = np.ascontiguousarray(a.reshape(-1))
+    return _BYTE_POPCOUNT[flat.view(np.uint8)].reshape(-1, 8).sum(axis=1).reshape(a.shape)
+
+@njit
+def parity_sign(a: np.ndarray) -> np.ndarray:
+    """(-1)^{popcount(a)} as float array."""
+    return 1.0 - 2.0 * (popcount(a) & 1)
+
+
+@njit
 def generator_offload(psi : numpy.ndarray, 
                       self__x : numpy.uint64, 
                       self_x : int, 
@@ -38,14 +66,15 @@ def generator_offload(psi : numpy.ndarray,
     src = idx ^ self__x
     d = np.zeros(idx.size, dtype=np.complex128)
     for z, g in zip(self_zs, self_gs):
-        ph = 1j * g * (1j) ** (bin(self_x & z).count('1') % 4)
-        d += ph * parity_sign(src & np.uint64(z)) if z else ph
+        # convert explicitly to array because numba is not happy about implict conversion
+        ph = np.array([1j * g * (1j) ** (one_popcnt(self_x & z) % 4)] * (idx.size))
+        d = d + (ph * parity_sign(src & np.uint64(z)) if z else ph)
     if np.all(np.abs(d.imag) < 1e-14):
-        d = np.ascontiguousarray(d.real)
+        d = np.ascontiguousarray(d.real).astype(np.complex128)
 
     return d * (psi[idx ^ self__x] if self_x else psi)
 
-
+@njit
 def rotate_offload(self__x : numpy.uint64, 
                    self_x : int, 
                    self_zs, 
@@ -58,7 +87,7 @@ def rotate_offload(self__x : numpy.uint64,
     src = idx ^ self__x
     d = np.zeros(idx.size, dtype=np.complex128)
     for z, g in zip(self_zs, self_gs):
-        ph = 1j * g * (1j) ** (bin(self_x & z).count("1") % 4)
+        ph = 1j * g * (1j) ** (one_popcnt(self_x & z) % 4)
         d += ph * parity_sign(src & np.uint64(z)) if z else ph
     if np.all(np.abs(d.imag) < 1e-14):
         d = np.ascontiguousarray(d.real)

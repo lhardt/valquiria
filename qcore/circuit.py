@@ -54,6 +54,7 @@ class Rotation:
         self.x = int(x)
         self.zs = [int(z) for z in zs]
         self.gs = [float(g) for g in gs]
+        #self.gzs_zip = [(z,g) for z,g in zip(self.zs,self.gs)]
         self.coeff = float(coeff)
         self.param = param
         self._x = np.uint64(self.x)
