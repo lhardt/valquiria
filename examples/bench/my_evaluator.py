@@ -82,18 +82,19 @@ def rotate_offload(self__x : numpy.uint64,
                    idx : numpy.ndarray, 
                    a : numpy.float64,
                    psi : numpy.ndarray,
-                   g_psi: numpy.ndarray):
+                   g_psi: numpy.ndarray | None):
+
+    g_psi = generator_offload(psi, self__x, self_x, self_zs, self_gs, idx) if g_psi is None else g_psi
 
     src = idx ^ self__x
     d = np.zeros(idx.size, dtype=np.complex128)
     for z, g in zip(self_zs, self_gs):
-        ph = 1j * g * (1j) ** (one_popcnt(self_x & z) % 4)
+        ph = np.array([1j * g * (1j) ** (one_popcnt(self_x & z) % 4)] * (idx.size))
         d += ph * parity_sign(src & np.uint64(z)) if z else ph
     if np.all(np.abs(d.imag) < 1e-14):
-        d = np.ascontiguousarray(d.real)
+        d = np.ascontiguousarray(d.real).astype(np.complex128)
     w = np.abs(d)
     binary = bool(np.all((np.abs(w) < 1e-12) | (np.abs(w - 1) < 1e-12)))
-    w2 = (w > 0.5).astype(float) if binary else w
 
     #d, w, binary = self._diag(idx)
     if self_x == 0:  # diagonal generator: exp(a d) elementwise
@@ -106,9 +107,27 @@ def rotate_offload(self__x : numpy.uint64,
     safe = np.where(w > 0, w, 1.0)
     return np.cos(aw) * psi + np.where(w > 0, np.sin(aw) / safe, a) * g_psi
 
+@njit
 def angle_offload(coeff, theta, param) -> float:
     return coeff * theta[param] if param is not None else coeff
 
+# TODO njit: scipy matrix may need to be converted
+def hamiltonian_offload(hamiltonian : scipy.sparse._csr.csr_matrix, psi : numpy.ndarray) :
+    return hamiltonian @ psi
+
+
+
+def energy_and_gradient_offload(ops, theta, phi, lam, idx):
+    energy = float(np.real(np.vdot(phi, lam)))
+    grad = np.zeros(theta.size)
+    for op in ops[::-1]:  # walk the circuit backwards, undoing one rotation at a time
+        a = angle_offload(op.coeff, theta, op.param)
+        g_phi = generator_offload(phi, op._x, op.x, op.zs, op.gs, idx)
+        grad[op.param] += 2.0 * op.coeff * np.real(np.vdot(lam, g_phi))
+        if a != 0.0:
+            phi = rotate_offload(op._x, op.x, op.zs, op.gs, idx, -a, phi, g_phi)
+            lam = rotate_offload(op._x, op.x, op.zs, op.gs, idx, -a, lam, None)
+    return energy, grad
 
 class MyEvaluator:
     def __init__(self, case, comm=None):
@@ -142,9 +161,6 @@ class MyEvaluator:
 
     def rotate(self, op, psi, angle, g_psi=None):
         """exp(angle * G) psi, an exact 2x2 rotation on each amplitude pair."""
-        g_psi = self.generator(op, psi) if g_psi is None else g_psi
-
-        #op.rotate(psi, angle, g_psi, self.idx)
         return  rotate_offload(op._x, op.x, op.zs, op.gs, self.idx, angle, psi, g_psi) 
 
     def apply_h(self, psi):
@@ -162,15 +178,6 @@ class MyEvaluator:
         for op in self.ops:
             a = angle_offload(op.coeff, theta, op.param) # op.angle(theta)
             if a != 0.0:
-                phi = self.rotate(op, phi, a)
-        lam = self.apply_h(phi)
-        energy = float(np.real(self.overlap(phi, lam)))
-        grad = np.zeros(theta.size)
-        for op in reversed(self.ops):  # walk the circuit backwards, undoing one rotation at a time
-            a = op.angle(theta)
-            g_phi = self.generator(op, phi)
-            grad[op.param] += 2.0 * op.coeff * np.real(self.overlap(lam, g_phi))
-            if a != 0.0:
-                phi = self.rotate(op, phi, -a, g_phi)
-                lam = self.rotate(op, lam, -a)
-        return energy, grad
+                phi = rotate_offload(op._x, op.x, op.zs, op.gs, self.idx, a, phi, None)
+        lam = hamiltonian_offload(self.hamiltonian, phi)
+        return energy_and_gradient_offload(self.ops, theta, phi, lam, self.idx)
