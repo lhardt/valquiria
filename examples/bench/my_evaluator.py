@@ -116,17 +116,17 @@ def hamiltonian_offload(hamiltonian : scipy.sparse._csr.csr_matrix, psi : numpy.
     return hamiltonian @ psi
 
 
-
-def energy_and_gradient_offload(ops, theta, phi, lam, idx):
+@njit
+def energy_and_gradient_offload(native_ops, theta, phi, lam, idx):
     energy = float(np.real(np.vdot(phi, lam)))
     grad = np.zeros(theta.size)
-    for op in ops[::-1]:  # walk the circuit backwards, undoing one rotation at a time
-        a = angle_offload(op.coeff, theta, op.param)
-        g_phi = generator_offload(phi, op._x, op.x, op.zs, op.gs, idx)
-        grad[op.param] += 2.0 * op.coeff * np.real(np.vdot(lam, g_phi))
+    for (op__x, op_x, op_zs, op_gs, op_param, op_coeff) in native_ops[::-1]:  # walk the circuit backwards, undoing one rotation at a time
+        a = angle_offload(op_coeff, theta, op_param)
+        g_phi = generator_offload(phi, op__x, op_x, op_zs, op_gs, idx)
+        grad[op_param] += 2.0 * op_coeff * np.real(np.vdot(lam, g_phi))
         if a != 0.0:
-            phi = rotate_offload(op._x, op.x, op.zs, op.gs, idx, -a, phi, g_phi)
-            lam = rotate_offload(op._x, op.x, op.zs, op.gs, idx, -a, lam, None)
+            phi = rotate_offload(op__x, op_x, op_zs, op_gs, idx, -a, phi, g_phi)
+            lam = rotate_offload(op__x, op_x, op_zs, op_gs, idx, -a, lam, None)
     return energy, grad
 
 class MyEvaluator:
@@ -152,6 +152,8 @@ class MyEvaluator:
         self.idx = self.circuit.idx
         # each excitation k is one block rotation exp(theta_k G_k) acting on pairs (c, c ^ x)
         self.ops = self.circuit.ops
+
+        self.native_ops = [(op._x, op.x, op.zs, op.gs, op.param, op.coeff) for op in self.ops]
 
     # ------------------------------------------------------------ the three hot kernels
     def generator(self, op, psi):
@@ -180,4 +182,4 @@ class MyEvaluator:
             if a != 0.0:
                 phi = rotate_offload(op._x, op.x, op.zs, op.gs, self.idx, a, phi, None)
         lam = hamiltonian_offload(self.hamiltonian, phi)
-        return energy_and_gradient_offload(self.ops, theta, phi, lam, self.idx)
+        return energy_and_gradient_offload(self.native_ops, theta, phi, lam, self.idx)
